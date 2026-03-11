@@ -15,6 +15,8 @@ type Message = {
 };
 
 export default function InterpreterView() {
+    const [isAuthorized, setIsAuthorized] = useState(false);
+    const [password, setPassword] = useState("");
     const [isRealtime, setIsRealtime] = useState(false);
     const [speaker, setSpeaker] = useState<"me" | "other">("me"); // me=KR, other=JP
     const [history, setHistory] = useState<Message[]>([]);
@@ -69,32 +71,42 @@ export default function InterpreterView() {
         }
     };
 
-    // 음성 합성 (TTS) 함수
+    // 음성 합성 (TTS) 함수 개선
     const speakJapanese = (text: string) => {
         if (typeof window !== "undefined" && window.speechSynthesis) {
-            // 기존에 말하고 있다면 중지
             window.speechSynthesis.cancel();
 
             const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = "ja-JP"; // 일본어 설정
+
+            // 일본어 음성 찾기 시도
+            const voices = window.speechSynthesis.getVoices();
+            const jaVoice = voices.find(v => v.lang.startsWith("ja"));
+            if (jaVoice) utterance.voice = jaVoice;
+
+            utterance.lang = "ja-JP";
             utterance.rate = 1.0;
-            window.speechSynthesis.speak(utterance);
+            utterance.pitch = 1.0;
+
+            // 모바일 브라우저 대응: 약간의 딜레이를 주어 실행 환경 확보
+            setTimeout(() => {
+                window.speechSynthesis.speak(utterance);
+            }, 100);
         }
     };
 
     // 실시간 번역 로직 (인식 중인 텍스트가 바뀔 때마다 호출)
     useEffect(() => {
         if (activeRecognition.transcript && (isRealtime || !activeRecognition.isListening)) {
-            // 실시간 모드가 아닐 경우(녹음 종료 시) 지연 없이 즉시 번역
             if (!activeRecognition.isListening) {
-                translateText(activeRecognition.transcript).then(translated => {
-                    // 한국어 -> 일본어 번역 시에만 음성 출력
+                // 녹음 종료 시 즉시 번역 및 TTS
+                const processFinal = async () => {
+                    const translated = await translateText(activeRecognition.transcript);
                     if (speaker === "me" && translated) {
                         speakJapanese(translated);
                     }
-                });
+                };
+                processFinal();
             } else if (isRealtime) {
-                // 실시간 모드일 경우에는 API 과부하 방지를 위해 디바운싱 유지
                 const timer = setTimeout(() => translateText(activeRecognition.transcript), 300);
                 return () => clearTimeout(timer);
             }
@@ -121,6 +133,32 @@ export default function InterpreterView() {
             finishTranslation();
         }
     }, [activeRecognition.isListening, activeRecognition.transcript, speaker]);
+
+    if (!isAuthorized) {
+        return (
+            <div className="flex flex-col items-center justify-center h-screen bg-slate-900 text-white p-6">
+                <div className="w-full max-w-xs space-y-6 text-center">
+                    <div className="p-4 bg-slate-800 rounded-2xl border border-slate-700">
+                        <Languages className="w-12 h-12 text-cyan-400 mx-auto mb-2" />
+                        <h1 className="text-xl font-bold">개인용 통역기</h1>
+                        <p className="text-xs text-slate-400">비밀번호를 입력하세요</p>
+                    </div>
+                    <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            setPassword(val);
+                            if (val === "7777") setIsAuthorized(true); // 간단한 예시 비밀번호
+                        }}
+                        placeholder="Passcode"
+                        className="w-full bg-slate-800 border-2 border-slate-700 rounded-xl p-4 text-center text-2xl tracking-[1em] focus:border-cyan-500 outline-none transition-colors"
+                        autoFocus
+                    />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col h-screen bg-slate-900 text-white font-sans overflow-hidden">
