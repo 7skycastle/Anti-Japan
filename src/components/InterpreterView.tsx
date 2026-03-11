@@ -69,11 +69,35 @@ export default function InterpreterView() {
         }
     };
 
+    // 음성 합성 (TTS) 함수
+    const speakJapanese = (text: string) => {
+        if (typeof window !== "undefined" && window.speechSynthesis) {
+            // 기존에 말하고 있다면 중지
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = "ja-JP"; // 일본어 설정
+            utterance.rate = 1.0;
+            window.speechSynthesis.speak(utterance);
+        }
+    };
+
     // 실시간 번역 로직 (인식 중인 텍스트가 바뀔 때마다 호출)
     useEffect(() => {
         if (activeRecognition.transcript && (isRealtime || !activeRecognition.isListening)) {
-            const timer = setTimeout(() => translateText(activeRecognition.transcript), 500); // 디바운싱
-            return () => clearTimeout(timer);
+            // 실시간 모드가 아닐 경우(녹음 종료 시) 지연 없이 즉시 번역
+            if (!activeRecognition.isListening) {
+                translateText(activeRecognition.transcript).then(translated => {
+                    // 한국어 -> 일본어 번역 시에만 음성 출력
+                    if (speaker === "me" && translated) {
+                        speakJapanese(translated);
+                    }
+                });
+            } else if (isRealtime) {
+                // 실시간 모드일 경우에는 API 과부하 방지를 위해 디바운싱 유지
+                const timer = setTimeout(() => translateText(activeRecognition.transcript), 300);
+                return () => clearTimeout(timer);
+            }
         }
     }, [activeRecognition.transcript, isRealtime, activeRecognition.isListening, speaker]);
 
@@ -81,7 +105,10 @@ export default function InterpreterView() {
     useEffect(() => {
         if (!activeRecognition.isListening && activeRecognition.transcript) {
             const finishTranslation = async () => {
+                // 이미 위 useEffect에서 번역을 수행하고 상태를 업데이트하므로, 
+                // 여기서는 상태값(currentTranslation)을 사용하여 히스토리만 생성
                 const finalTranslation = await translateText(activeRecognition.transcript);
+
                 const newMessage: Message = {
                     id: Date.now().toString(),
                     type: speaker,
@@ -89,7 +116,7 @@ export default function InterpreterView() {
                     translated: finalTranslation,
                     timestamp: Date.now(),
                 };
-                setHistory((prev) => [...prev, newMessage]); // 마이크를 다시 누를 때 지워지므로, 여기서는 마지막 대화만 유지하거나 요구사항에 맞춰 처리
+                setHistory((prev) => [...prev, newMessage]);
             };
             finishTranslation();
         }
